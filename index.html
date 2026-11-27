@@ -328,23 +328,40 @@ function todoForm(x){
   text,$("div",{class:"row"},lab("날짜",due),lab("시간",time)),$("div",{class:"row"},lab("상태",stat)),memo,
   $("div",{class:"row"},$("button",{class:"btn",textContent:x?"저장":"추가"}),x?cancelBtn():null));
 }
+function pmsg(t){var e=document.getElementById("pushmsg");if(e)e.textContent=t;}
 async function enablePush(){
  try{
-  if(await Notification.requestPermission()!=="granted"){alert("알림 권한이 필요해요");return;}
+  pmsg("⏳ 1/4 알림 권한 요청 중…");
+  var p=await Notification.requestPermission();
+  if(p!=="granted"){pmsg("❌ 알림 권한이 '"+p+"' 상태예요. 브라우저/폰 설정 > 사이트(또는 앱) 알림에서 '허용'으로 바꾼 뒤 다시 눌러주세요.");return;}
+  pmsg("⏳ 2/4 서비스워커 준비 중… (최대 10초)");
   var reg=await navigator.serviceWorker.register("sw.js");
   for(var i=0;i<40&&!reg.active;i++)await new Promise(function(r){setTimeout(r,250);});
   if(!reg.active)throw new Error("서비스워커가 활성화되지 않았어요. 저장소 루트에 sw.js가 있는지, 주소/sw.js가 열리는지 확인하세요.");
-  if(!firebase.messaging.isSupported()||VAPID_KEY.indexOf("YOUR")===0){alert("푸시를 지원하지 않는 환경이거나 VAPID_KEY가 비어 있어요. 앱이 열려 있을 때만 알림이 와요.");render();return;}
+  if(!firebase.messaging.isSupported())throw new Error("이 환경은 웹 푸시를 지원하지 않아요 (아이폰은 홈 화면에 추가한 앱에서만 가능)");
+  if(VAPID_KEY.indexOf("YOUR")===0)throw new Error("VAPID_KEY가 비어 있어요");
+  pmsg("⏳ 3/4 푸시 토큰 발급 중…");
   var tk=await firebase.messaging().getToken({vapidKey:VAPID_KEY,serviceWorkerRegistration:reg});
+  if(!tk)throw new Error("토큰이 비어 있어요");
+  pmsg("⏳ 4/4 저장 중…");
   await fdb.collection("users").doc(user.uid).collection("devices").doc(tk).set({token:tk,ua:navigator.userAgent.slice(0,80),updated:Date.now()});
-  localStorage.setItem("pushOn","1");render();
- }catch(err){alert("푸시 설정 실패: "+err.message);}
+  localStorage.setItem("pushOn","1");render();pmsg("✅ 푸시 등록 완료! '🧪 테스트 알림'으로 기기 표시를 확인해 보세요.");
+ }catch(err){pmsg("❌ "+(err.code||"")+" "+err.message);}
+}
+async function testPush(){
+ try{
+  if(Notification.permission!=="granted"){pmsg("❌ 먼저 알림 권한을 허용하세요 (왼쪽 버튼)");return;}
+  var r=await navigator.serviceWorker.getRegistration();if(!r)throw new Error("서비스워커가 없어요");
+  await r.showNotification("🧪 테스트 알림",{body:"이게 보이면 이 기기의 알림 표시는 정상이에요",icon:"icon-192.png"});
+  pmsg("✅ 테스트 알림을 보냈어요 (알림창을 확인하세요)");
+ }catch(err){pmsg("❌ "+err.message);}
 }
 function todoView(v){
  if(!editing("todo"))v.appendChild(todoForm(null));
  if("Notification" in window){
   var on=localStorage.getItem("pushOn")&&Notification.permission==="granted";
-  v.appendChild($("div",{class:"chips"},$("span",{class:"chip"+(on?"":" on"),textContent:on?"🔔 백그라운드 알림 켜짐":"🔔 백그라운드 알림 켜기",on:{click:function(){if(!on)enablePush();}}})));
+  v.appendChild($("div",{class:"chips"},$("span",{class:"chip"+(on?"":" on"),textContent:on?"🔔 켜짐 (눌러서 다시 등록)":"🔔 백그라운드 알림 켜기",on:{click:enablePush}}),$("span",{class:"chip",textContent:"🧪 테스트 알림",on:{click:testPush}})));
+  v.appendChild($("div",{class:"s",id:"pushmsg",style:"margin-bottom:8px",textContent:"알림 권한: "+Notification.permission+(on?" · 푸시 등록됨":" · 미등록")}));
  }
  v.appendChild(toggle("todo"));
  var all=items.filter(function(x){return x.kind==="todo";});
